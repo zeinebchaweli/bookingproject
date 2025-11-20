@@ -1,0 +1,91 @@
+pipeline {
+    agent any
+    options { timestamps() }
+    
+    environment {
+        DOCKER_IMAGE = 'your-dockerhub/booking-app'
+    }
+    
+    stages {
+        stage('Checkout Git') {
+            steps {
+                checkout scm
+                echo " Release code checked out - Tag: ${env.TAG_NAME}"
+            }
+        }
+        
+        stage('Setup Environment') {
+            steps {
+                bat 'docker --version'
+                bat 'git --version'
+                echo " Release environment ready"
+            }
+        }
+        
+        stage('Build Versioned Image') {
+            steps {
+                bat "docker build -t ${DOCKER_IMAGE}:${env.TAG_NAME} ."
+                bat "docker build -t ${DOCKER_IMAGE}:latest ."
+                echo " Release images built: ${env.TAG_NAME} and latest"
+            }
+        }
+        
+        stage('Run Production Tests') {
+            steps {
+                bat "docker run -d --name release-test-${env.BUILD_NUMBER} -p 8083:80 ${DOCKER_IMAGE}:${env.TAG_NAME}"
+                echo " Release container running on port 8083"
+            }
+        }
+        
+        stage('Production Smoke Test') {
+            steps {
+                script {
+                    sleep 10
+                    try {
+                        bat 'curl -s -o /dev/null -w "HTTP: %{http_code}" http://localhost:8083'
+                        bat 'curl -s http://localhost:8083 | find "DOCTYPE"'
+                        echo " Production tests PASSED"
+                        bat 'echo "Release: ${env.TAG_NAME}" > release-report-${env.TAG_NAME}.txt'
+                        bat 'echo "Build: ${env.BUILD_NUMBER}" >> release-report-${env.TAG_NAME}.txt'
+                        bat 'echo "Tests: PASSED" >> release-report-${env.TAG_NAME}.txt'
+                    } catch (Exception e) {
+                        echo "Production tests FAILED"
+                        bat 'echo "Release: ${env.TAG_NAME}" > release-report-${env.TAG_NAME}.txt'
+                        bat 'echo "Tests: FAILED" >> release-report-${env.TAG_NAME}.txt'
+                        currentBuild.result = 'FAILURE'
+                        error("Production tests failed")
+                    }
+                }
+            }
+        }
+        
+        stage('Archive Release Artifacts') {
+            steps {
+                archiveArtifacts artifacts: "release-report-${env.TAG_NAME}.txt", fingerprint: true
+                archiveArtifacts artifacts: 'Dockerfile', fingerprint: true
+                archiveArtifacts artifacts: 'package.json', fingerprint: true
+                echo " Release artifacts archived"
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                bat "docker stop release-test-${env.BUILD_NUMBER} || echo Container already stopped"
+                bat "docker rm release-test-${env.BUILD_NUMBER} || echo Container already removed"
+                echo " Release cleanup completed"
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo "🏁 Release Pipeline completed - Version ${env.TAG_NAME}"
+        }
+        success {
+            echo " RELEASE SUCCESSFUL! Version ${env.TAG_NAME} is ready for production!"
+        }
+        failure {
+            echo " RELEASE FAILED! Version ${env.TAG_NAME} cannot be deployed"
+        }
+    }
+}
