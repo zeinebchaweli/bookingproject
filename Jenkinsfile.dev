@@ -1,0 +1,88 @@
+pipeline {
+    agent any
+    options { timestamps() }
+    
+    environment {
+        IMAGE_NAME = 'booking-app'
+    }
+    
+    stages {
+        stage('Checkout Git') {
+            steps {
+                checkout scm
+                echo " Dev branch code checked out"
+            }
+        }
+        
+        stage('Setup Environment') {
+            steps {
+                bat 'docker --version'
+                bat 'npm --version'
+                echo " Dev environment ready"
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                bat "docker build -t ${IMAGE_NAME}:dev-${env.BUILD_NUMBER} ."
+                bat "docker tag ${IMAGE_NAME}:dev-${env.BUILD_NUMBER} ${IMAGE_NAME}:dev-latest"
+                echo " Dev image built and tagged"
+            }
+        }
+        
+        stage('Run Container for Testing') {
+            steps {
+                bat "docker run -d --name dev-test-${env.BUILD_NUMBER} -p 8082:80 ${IMAGE_NAME}:dev-${env.BUILD_NUMBER}"
+                echo " Dev container running on port 8082"
+            }
+        }
+        
+        stage('Comprehensive Smoke Test') {
+            steps {
+                script {
+                    sleep 10
+                    try {
+                        bat 'curl -s -o /dev/null -w "HTTP Status: %{http_code}" http://localhost:8082'
+                        bat 'curl -s http://localhost:8082 | find "root"'
+                        echo " Dev smoke tests PASSED"
+                        bat 'echo "Dev Tests: ALL PASSED" > dev-test-results.txt'
+                        bat 'echo "Build: ${env.BUILD_NUMBER}" >> dev-test-results.txt'
+                    } catch (Exception e) {
+                        echo " Dev smoke tests FAILED"
+                        bat 'echo "Dev Tests: FAILED" > dev-test-results.txt'
+                        currentBuild.result = 'FAILURE'
+                        error("Dev tests failed")
+                    }
+                }
+            }
+        }
+        
+        stage('Archive Dev Artifacts') {
+            steps {
+                archiveArtifacts artifacts: 'dev-test-results.txt', fingerprint: true
+                archiveArtifacts artifacts: 'Dockerfile', fingerprint: true
+                echo "Dev artifacts archived"
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                bat "docker stop dev-test-${env.BUILD_NUMBER} || echo Container already stopped"
+                bat "docker rm dev-test-${env.BUILD_NUMBER} || echo Container already removed"
+                echo " Dev cleanup completed"
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo "🔧 Dev Pipeline completed - Build ${env.BUILD_NUMBER}"
+        }
+        success {
+            echo "🎉 Dev Pipeline SUCCESS - Ready for staging!"
+        }
+        failure {
+            echo " Dev Pipeline FAILED - Fix required!"
+        }
+    }
+}
