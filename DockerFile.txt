@@ -1,0 +1,30 @@
+# Dockerfile pour application React avec Vite - VERSION CORRIGÉE
+
+# Étape 1: Build de l'application
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Copier les fichiers de configuration
+COPY package*.json ./
+
+# Installer TOUTES les dépendances (production + développement)
+RUN npm ci
+
+# Copier le code source
+COPY . .
+
+# Builder l'application
+RUN npm run build
+
+# Étape 2: Serveur de production
+FROM nginx:alpine
+
+# Copier les fichiers buildés vers nginx
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Exposer le port 80
+EXPOSE 80
+
+# Démarrer nginx
+CMD ["nginx", "-g", "daemon off;"]
