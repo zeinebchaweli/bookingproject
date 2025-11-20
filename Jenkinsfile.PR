@@ -1,86 +1,61 @@
 pipeline {
     agent any
-    options { timestamps() }
-    
-    environment {
-        IMAGE_NAME = 'booking-app'
-    }
     
     stages {
-        stage('Checkout Git') {
+        stage('Checkout') {
             steps {
-                checkout scm
-                echo " Repository cloned successfully"
+                git branch: 'test-pr', url: 'https://github.com/zeinebchaweli/bookingproject.git'
             }
         }
         
-        stage('Setup Environment') {
+        stage('Setup') {
             steps {
-                bat 'docker --version'
-                bat 'node --version'
-                echo "Environment setup completed"
+                sh 'docker --version'
+                sh 'java -version || echo "Java not installed"'
             }
         }
         
         stage('Build Docker Image') {
             steps {
-                bat "docker build -t ${IMAGE_NAME}:pr-${env.BUILD_NUMBER} ."
-                echo " Docker image built: ${IMAGE_NAME}:pr-${env.BUILD_NUMBER}"
+                sh 'docker build -t booking-app:pr-${BUILD_NUMBER} .'
             }
         }
         
-        stage('Run Container for Testing') {
+        stage('Run Docker Container') {
             steps {
-                bat "docker run -d --name test-${env.BUILD_NUMBER} -p 8081:80 ${IMAGE_NAME}:pr-${env.BUILD_NUMBER}"
-                echo "Container started on port 8081"
+                sh 'docker run -d --name test-${BUILD_NUMBER} -p 8082:80 booking-app:pr-${BUILD_NUMBER}'
             }
         }
         
         stage('Smoke Test') {
             steps {
-                script {
-                    sleep 5  // Wait for container to start
-                    try {
-                        bat 'curl -s -o /dev/null -w "%{http_code}" http://localhost:8081 | find "200"'
-                        echo " Smoke test PASSED - Application is responding"
-                        bat 'echo "Smoke Test: PASSED" > test-results.txt'
-                    } catch (Exception e) {
-                        echo " Smoke test FAILED - Application not responding"
-                        bat 'echo "Smoke Test: FAILED" > test-results.txt'
-                        currentBuild.result = 'FAILURE'
-                        error("Smoke test failed")
-                    }
-                }
+                sh '''
+                    echo " Waiting for application to start..."
+                    sleep 15
+                    curl -f http://localhost:8082 || exit 1
+                    echo " Smoke test passed!"
+                '''
             }
         }
         
-        stage('Archive Test Results') {
+        stage('Archive Artifacts') {
             steps {
-                archiveArtifacts artifacts: 'test-results.txt', fingerprint: true
-                echo "Test results archived"
-            }
-        }
-        
-        stage('Cleanup') {
-            steps {
-                bat "docker stop test-${env.BUILD_NUMBER} || echo Container already stopped"
-                bat "docker rm test-${env.BUILD_NUMBER} || echo Container already removed"
-                echo " Cleanup completed"
+                sh 'docker logs test-${BUILD_NUMBER} > docker-logs-${BUILD_NUMBER}.txt'
+                archiveArtifacts 'docker-logs-${BUILD_NUMBER}.txt'
             }
         }
     }
     
     post {
         always {
-            echo "🚀 Pipeline PR execution completed - Build ${env.BUILD_NUMBER}"
+            sh 'docker stop test-${BUILD_NUMBER} || true'
+            sh 'docker rm test-${BUILD_NUMBER} || true'
         }
         success {
-            echo "🎉 PR Pipeline SUCCESS - Ready for merge!"
-            bat 'echo "BUILD STATUS: SUCCESS" >> test-results.txt'
+            echo ' Pipeline PR completed successfully!'
         }
         failure {
-            echo "PR Pipeline FAILED - Check the code!"
-            bat 'echo "BUILD STATUS: FAILED" >> test-results.txt'
+            echo ' Pipeline PR failed!'
         }
     }
 }
