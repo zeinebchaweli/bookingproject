@@ -1,61 +1,149 @@
 pipeline {
     agent any
     
+    environment {
+        DOCKER_IMAGE = "myapp"
+        DOCKER_TAG = "pr-${env.CHANGE_ID}"
+        CONTAINER_NAME = "myapp-pr-${env.CHANGE_ID}"
+    }
+    
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'test-pr', url: 'https://github.com/zeinebchaweli/bookingproject.git'
+                script {
+                    echo "=== Checkout du code depuis la PR #${env.CHANGE_ID} ==="
+                    checkout scm
+                }
             }
         }
         
         stage('Setup') {
             steps {
-                sh 'docker --version'
-                sh 'java -version || echo "Java not installed"'
+                script {
+                    echo "=== Configuration de l'environnement ==="
+                    bat '''
+                        echo "Node version:"
+                        node --version || echo "Node non installé"
+                        echo "Docker version:"
+                        docker --version
+                        echo "Nettoyage des anciens conteneurs..."
+                        docker rm -f ${CONTAINER_NAME} || true
+                    '''
+                }
             }
         }
         
-        stage('Build Docker Image') {
+        stage('Build') {
             steps {
-                sh 'docker build -t booking-app:pr-${BUILD_NUMBER} .'
+                script {
+                    echo "=== Build de l'image Docker ==="
+                    bat '''
+                        docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                        echo "Image créée: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    '''
+                }
             }
         }
         
-        stage('Run Docker Container') {
+        stage('Run') {
             steps {
-                sh 'docker run -d --name test-${BUILD_NUMBER} -p 8082:80 booking-app:pr-${BUILD_NUMBER}'
+                script {
+                    echo "=== Démarrage du conteneur Docker ==="
+                    bat '''
+                        docker run -d \
+                            --name ${CONTAINER_NAME} \
+                            -p 3000:3000 \
+                            ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        
+                        echo "Attente du démarrage de l'application..."
+                        sleep 10
+                        
+                        docker logs ${CONTAINER_NAME}
+                    '''
+                }
             }
         }
         
         stage('Smoke Test') {
             steps {
-                sh '''
-                    echo " Waiting for application to start..."
-                    sleep 15
-                    curl -f http://localhost:8082 || exit 1
-                    echo " Smoke test passed!"
-                '''
+                script {
+                    echo "=== Exécution des tests Smoke ==="
+                    bat '''
+                        # Test 1: Vérifier que le conteneur est en cours d'exécution
+                        if docker ps | grep -q ${CONTAINER_NAME}; then
+                            echo "✓ Conteneur en cours d'exécution"
+                        else
+                            echo "✗ Conteneur non démarré"
+                            exit 1
+                        fi
+                        
+                        # Test 2: Vérifier la santé de l'application (endpoint HTTP)
+                        response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "000")
+                        if [ "$response" = "200" ] || [ "$response" = "301" ] || [ "$response" = "302" ]; then
+                            echo "✓ Application répond correctement (HTTP $response)"
+                        else
+                            echo "✗ Application ne répond pas (HTTP $response)"
+                            exit 1
+                        fi
+                        
+                        # Test 3: Vérifier les logs pour erreurs critiques
+                        if docker logs ${CONTAINER_NAME} 2>&1 | grep -i "error\|fatal\|exception" | grep -v "test"; then
+                            echo "⚠ Des erreurs ont été détectées dans les logs"
+                        else
+                            echo "✓ Aucune erreur critique dans les logs"
+                        fi
+                        
+                        echo "=== Smoke Tests PASSED ==="
+                    '''
+                }
             }
         }
         
         stage('Archive Artifacts') {
             steps {
-                sh 'docker logs test-${BUILD_NUMBER} > docker-logs-${BUILD_NUMBER}.txt'
-                archiveArtifacts 'docker-logs-${BUILD_NUMBER}.txt'
+                script {
+                    echo "=== Archivage des artefacts ==="
+                    bat '''
+                        mkdir -p artifacts
+                        
+                        # Sauvegarder les logs du conteneur
+                        docker logs ${CONTAINER_NAME} > artifacts/container-logs.txt 2>&1
+                        
+                        # Créer un rapport de test
+                        cat > artifacts/smoke-test-report.txt << EOF
+                 
+                        echo "Artefacts créés dans le dossier artifacts/"
+                        ls -la artifacts/
+                    '''
+                    
+                    archiveArtifacts artifacts: 'artifacts/**/*', fingerprint: true
+                }
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                script {
+                    echo "=== Nettoyage ==="
+                    bat '''
+                        docker stop ${CONTAINER_NAME} || true
+                        docker rm ${CONTAINER_NAME} || true
+                        echo "Nettoyage terminé"
+                    '''
+                }
             }
         }
     }
     
     post {
         always {
-            sh 'docker stop test-${BUILD_NUMBER} || true'
-            sh 'docker rm test-${BUILD_NUMBER} || true'
+            echo "=== Pipeline terminé ==="
         }
         success {
-            echo ' Pipeline PR completed successfully!'
+            echo "✓ Build & Smoke Test réussi pour la PR #${env.CHANGE_ID}"
         }
         failure {
-            echo ' Pipeline PR failed!'
+            echo "✗ Build & Smoke Test échoué pour la PR #${env.CHANGE_ID}"
         }
     }
 }
