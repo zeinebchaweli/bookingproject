@@ -1,61 +1,111 @@
 pipeline {
     agent any
     
+    environment {
+        DOCKER_IMAGE = "booking-app"
+        CONTAINER_NAME = "test-${BUILD_NUMBER}"
+    }
+    
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'test-pr', url: 'https://github.com/zeinebchaweli/bookingproject.git'
+                echo "=== Checkout du code ==="
+                git branch: 'test-pr', 
+                    url: 'https://github.com/zeinebchaweli/bookingproject.git'
+                sh 'ls -la'  // Vérifier que le code est bien récupéré
             }
         }
         
         stage('Setup') {
             steps {
+                echo "=== Vérification de l'environnement ==="
                 sh 'docker --version'
                 sh 'java -version || echo "Java not installed"'
+                // Nettoyer les anciens conteneurs
+                sh 'docker rm -f ${CONTAINER_NAME} || true'
             }
         }
         
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t booking-app:pr-${BUILD_NUMBER} .'
+                echo "=== Build de l'image Docker ==="
+                script {
+                    // Vérifier que le Dockerfile existe
+                    sh 'ls -la Dockerfile'
+                    // Build
+                    sh 'docker build -t ${DOCKER_IMAGE}:pr-${BUILD_NUMBER} .'
+                    // Vérifier que l'image a été créée
+                    sh 'docker images | grep ${DOCKER_IMAGE}'
+                }
             }
         }
         
         stage('Run Docker Container') {
             steps {
-                sh 'docker run -d --name test-${BUILD_NUMBER} -p 8082:80 booking-app:pr-${BUILD_NUMBER}'
+                echo "=== Démarrage du conteneur ==="
+                sh '''
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        -p 8082:80 \
+                        ${DOCKER_IMAGE}:pr-${BUILD_NUMBER}
+                    
+                    echo "Conteneur démarré avec succès"
+                    docker ps | grep ${CONTAINER_NAME}
+                '''
             }
         }
         
         stage('Smoke Test') {
             steps {
+                echo "=== Exécution des tests smoke ==="
                 sh '''
-                    echo " Waiting for application to start..."
+                    echo "Attente du démarrage de l'application..."
                     sleep 15
-                    curl -f http://localhost:8082 || exit 1
-                    echo " Smoke test passed!"
+                    
+                    echo "Test de l'endpoint..."
+                    response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8082 || echo "000")
+                    
+                    if [ "$response" = "200" ] || [ "$response" = "301" ] || [ "$response" = "302" ]; then
+                        echo "✓ Application répond correctement (HTTP $response)"
+                    else
+                        echo "✗ Application ne répond pas (HTTP $response)"
+                        docker logs ${CONTAINER_NAME}
+                        exit 1
+                    fi
+                    
+                    echo "✓ Smoke test passed!"
                 '''
             }
         }
         
         stage('Archive Artifacts') {
             steps {
-                sh 'docker logs test-${BUILD_NUMBER} > docker-logs-${BUILD_NUMBER}.txt'
-                archiveArtifacts 'docker-logs-${BUILD_NUMBER}.txt'
+                echo "=== Archivage des artefacts ==="
+                sh '''
+                    mkdir -p artifacts
+                    docker logs ${CONTAINER_NAME} > artifacts/docker-logs-${BUILD_NUMBER}.txt
+                    echo "Build #${BUILD_NUMBER} - SUCCESS" > artifacts/build-report.txt
+                '''
+                archiveArtifacts artifacts: 'artifacts/**/*', fingerprint: true
             }
         }
     }
     
     post {
         always {
-            sh 'docker stop test-${BUILD_NUMBER} || true'
-            sh 'docker rm test-${BUILD_NUMBER} || true'
+            echo "=== Nettoyage ==="
+            sh '''
+                docker stop ${CONTAINER_NAME} || true
+                docker rm ${CONTAINER_NAME} || true
+                echo "Nettoyage terminé"
+            '''
         }
         success {
-            echo ' Pipeline PR completed successfully!'
+            echo "✓ Pipeline PR completed successfully!"
         }
         failure {
-            echo ' Pipeline PR failed!'
+            echo "✗ Pipeline PR failed!"
+            sh 'docker logs ${CONTAINER_NAME} || true'
         }
     }
 }
