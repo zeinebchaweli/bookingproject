@@ -1,0 +1,71 @@
+
+  pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'VERSION', defaultValue: 'v1.0.0', description: 'Version')
+    }
+    
+    environment {
+        DOCKER_IMAGE = "booking-app"
+        CONTAINER_NAME = "booking-rel-${params.VERSION}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "=== Checkout ${params.VERSION} ==="
+                checkout scm
+            }
+        }
+        
+        stage('Setup') {
+            steps {
+                bat '''
+                    echo %VERSION% | findstr /R "^v[0-9]*\.[0-9]*\.[0-9]*$" || exit /b 1
+                    if not exist release mkdir release
+                '''
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                bat 'docker build -t %DOCKER_IMAGE%:%VERSION% .'
+            }
+        }
+        
+        stage('Run') {
+            steps {
+                bat '''
+                    docker run -d --name %CONTAINER_NAME% -p 8084:80 %DOCKER_IMAGE%:%VERSION%
+                    timeout /t 10 /nobreak
+                '''
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                bat 'curl -f http://localhost:8084 || exit /b 1'
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                bat '''
+                    docker save %DOCKER_IMAGE%:%VERSION% -o release\\image-%VERSION%.tar
+                    docker logs %CONTAINER_NAME% > release\\logs.txt 2>&1
+                '''
+                archiveArtifacts 'release/**/*'
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                bat '''
+                    docker stop %CONTAINER_NAME% || echo OK
+                    docker rm %CONTAINER_NAME% || echo OK
+                '''
+            }
+        }
+    }
+}
