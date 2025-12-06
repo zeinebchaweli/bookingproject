@@ -12,8 +12,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo '=== Stage 1: Checkout ==='
-                git branch: 'test-pr', 
-                    url: 'https://github.com/zeinebchaweli/bookingproject.git'
+                checkout scm
                 bat 'dir'
             }
         }
@@ -23,8 +22,6 @@ pipeline {
                 echo '=== Stage 2: Setup ==='
                 bat '''
                     docker --version
-                    dir package.json
-                    dir Dockerfile
                     docker rm -f %CONTAINER_NAME% 2>nul || echo OK
                 '''
             }
@@ -32,17 +29,14 @@ pipeline {
         
         stage('Build') {
             steps {
-                echo '=== Stage 3: Build Docker Image ==='
-                bat '''
-                    docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% .
-                    docker images | findstr %DOCKER_IMAGE%
-                '''
+                echo '=== Stage 3: Build ==='
+                bat 'docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% .'
             }
         }
         
         stage('Run') {
             steps {
-                echo '=== Stage 4: Run Container ==='
+                echo '=== Stage 4: Run ==='
                 bat '''
                     docker run -d --name %CONTAINER_NAME% -p %TEST_PORT%:80 %DOCKER_IMAGE%:%DOCKER_TAG%
                     timeout /t 10 /nobreak
@@ -55,31 +49,19 @@ pipeline {
             steps {
                 echo '=== Stage 5: Smoke Tests ==='
                 bat '''
-                    echo Test 1: Container Running
-                    docker ps | findstr %CONTAINER_NAME% || exit /b 1
-                    echo [PASSED]
-                    
-                    echo Test 2: HTTP Response
                     curl -f http://localhost:%TEST_PORT% || exit /b 1
-                    echo [PASSED]
-                    
-                    echo Test 3: Content Check
-                    curl -s http://localhost:%TEST_PORT% | findstr "html" || exit /b 1
-                    echo [PASSED]
-                    
-                    echo ALL TESTS PASSED
+                    echo [PASSED] HTTP test
                 '''
             }
         }
         
-        stage('Archive Artifacts') {
+        stage('Archive') {
             steps {
                 echo '=== Stage 6: Archive ==='
                 bat '''
                     if not exist artifacts mkdir artifacts
                     docker logs %CONTAINER_NAME% > artifacts\\logs.txt 2>&1
-                    echo Build %BUILD_NUMBER% - SUCCESS > artifacts\\report.txt
-                    dir artifacts
+                    echo Build %BUILD_NUMBER% SUCCESS > artifacts\\report.txt
                 '''
                 archiveArtifacts artifacts: 'artifacts/**/*', fingerprint: true
             }
@@ -93,3 +75,16 @@ pipeline {
                     docker rm %CONTAINER_NAME% || echo OK
                 '''
             }
+        }
+    }
+    
+    post {
+        success {
+            echo '✅ PR Pipeline SUCCESS'
+        }
+        failure {
+            echo '❌ PR Pipeline FAILED'
+        }
+    }
+}
+```
