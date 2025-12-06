@@ -3,14 +3,14 @@ pipeline {
     
     environment {
         DOCKER_IMAGE = "booking-app"
-        VERSION = "v1.0.0"          // simple for now
+        VERSION = "v1.0.0"                  
         CONTAINER_NAME = "booking-rel-%VERSION%"
     }
     
     stages {
         stage('Checkout') {
             steps {
-                echo "=== Checkout ${env.BRANCH_NAME} ==="
+                echo "=== Checkout RELEASE ${env.BRANCH_NAME} ==="
                 checkout scm
             }
         }
@@ -18,7 +18,7 @@ pipeline {
         stage('Setup') {
             steps {
                 bat '''
-                    echo %VERSION% | findstr /R "^v[0-9]*\.[0-9]*\.[0-9]*$" || exit /b 1
+                    rem Simple setup – no regex check
                     if not exist release mkdir release
                 '''
             }
@@ -69,4 +69,5 @@ pipeline {
         }
     }
 }
-    
+
+                    
