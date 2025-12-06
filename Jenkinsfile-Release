@@ -30,12 +30,13 @@ pipeline {
             }
         }
 
-        stage('Run') {
+         stage('Run') {
             steps {
                 bat """
                     docker rm -f ${CONTAINER_NAME} 2>nul || echo OK
                     docker run -d --name ${CONTAINER_NAME} -p 8084:80 %DOCKER_IMAGE%:%VERSION%
-                    timeout /t 10
+                    rem Wait ~10 seconds for container to start
+                    ping 127.0.0.1 -n 10 >nul
                 """
             }
         }
