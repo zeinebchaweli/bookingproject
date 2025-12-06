@@ -1,108 +1,84 @@
 pipeline {
-    agent any  // Keep but ensure Windows agent has Docker + Node.js
+    agent any
     
     environment {
-        DOCKER_IMAGE = "myapp"
-        DOCKER_TAG = "pr-${env.CHANGE_ID}"
-        CONTAINER_NAME = "myapp-pr-${env.CHANGE_ID}"
-        JENKINS_URL = "http://localhost:8081"  // Your Jenkins URL
+        DOCKER_IMAGE = "booking-app"
+        DOCKER_TAG = "pr-${BUILD_NUMBER}"
+        CONTAINER_NAME = "booking-pr-${BUILD_NUMBER}"
+        TEST_PORT = "8082"
     }
     
     stages {
-        // ... Checkout and Setup stages remain same ...
+        stage('Checkout') {
+            steps {
+                echo '=== Stage 1: Checkout ==='
+                git branch: 'test-pr', 
+                    url: 'https://github.com/zeinebchaweli/bookingproject.git'
+                bat 'dir'
+            }
+        }
         
         stage('Setup') {
             steps {
-                script {
-                    echo "=== Configuration Windows ==="
-                    bat '''  // Use bat instead of sh on Windows
-                        echo Node version:
-                        node --version || echo Node non installé
-                        echo Docker version:
-                        docker --version
-                        echo Nettoyage des conteneurs...
-                        docker rm -f %CONTAINER_NAME% || exit /b 0
-                    '''
-                }
+                echo '=== Stage 2: Setup ==='
+                bat '''
+                    docker --version
+                    dir package.json
+                    dir Dockerfile
+                    docker rm -f %CONTAINER_NAME% 2>nul || echo OK
+                '''
             }
         }
         
-        // Build stage - keep sh if Docker build works, or use bat
         stage('Build') {
             steps {
+                echo '=== Stage 3: Build Docker Image ==='
                 bat '''
                     docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% .
-                    echo Image créée: %DOCKER_IMAGE%:%DOCKER_TAG%
+                    docker images | findstr %DOCKER_IMAGE%
                 '''
             }
         }
         
-        // Run stage
         stage('Run') {
             steps {
+                echo '=== Stage 4: Run Container ==='
                 bat '''
-                    docker run -d ^
-                        --name %CONTAINER_NAME% ^
-                        -p 3000:3000 ^
-                        %DOCKER_IMAGE%:%DOCKER_TAG%
-                    
-                    echo Attente démarrage...
-                    timeout /t 10 /nobreak >nul
-                    
-                    docker logs %CONTAINER_NAME%
+                    docker run -d --name %CONTAINER_NAME% -p %TEST_PORT%:80 %DOCKER_IMAGE%:%DOCKER_TAG%
+                    timeout /t 10 /nobreak
+                    docker ps | findstr %CONTAINER_NAME%
                 '''
             }
         }
         
-        // Smoke Test - Windows PowerShell version
         stage('Smoke Test') {
             steps {
-                powershell '''
-                    Write-Host "=== Tests Smoke Windows ==="
+                echo '=== Stage 5: Smoke Tests ==='
+                bat '''
+                    echo Test 1: Container Running
+                    docker ps | findstr %CONTAINER_NAME% || exit /b 1
+                    echo [PASSED]
                     
-                    # Test 1: Conteneur en cours d'exécution
-                    $running = docker ps --format "table {{.Names}}" | Select-String "%CONTAINER_NAME%"
-                    if ($running) {
-                        Write-Host "✓ Conteneur en cours d'exécution"
-                    } else {
-                        Write-Host "✗ Conteneur non démarré"
-                        exit 1
-                    }
+                    echo Test 2: HTTP Response
+                    curl -f http://localhost:%TEST_PORT% || exit /b 1
+                    echo [PASSED]
                     
-                    # Test 2: Health check HTTP
-                    try {
-                        $response = Invoke-WebRequest -Uri "http://localhost:3000" -Method Head -UseBasicParsing -TimeoutSec 10
-                        Write-Host "✓ Application OK (HTTP $($response.StatusCode))"
-                    } catch {
-                        Write-Host "✗ Application ne répond pas (HTTP 000)"
-                        exit 1
-                    }
+                    echo Test 3: Content Check
+                    curl -s http://localhost:%TEST_PORT% | findstr "html" || exit /b 1
+                    echo [PASSED]
                     
-                    # Test 3: Logs erreurs
-                    $logs = docker logs %CONTAINER_NAME% 2>&1
-                    $errors = $logs | Select-String -Pattern "error|fatal|exception" -NotMatch "test"
-                    if ($errors) {
-                        Write-Host "⚠ Erreurs dans les logs"
-                    } else {
-                        Write-Host "✓ Aucune erreur critique"
-                    }
-                    
-                    Write-Host "=== Smoke Tests PASSED ==="
+                    echo ALL TESTS PASSED
                 '''
             }
         }
         
-        // Archive and Cleanup - use bat for Windows
         stage('Archive Artifacts') {
             steps {
+                echo '=== Stage 6: Archive ==='
                 bat '''
-                    mkdir artifacts || exit /b 0
-                    docker logs %CONTAINER_NAME% > artifacts\\container-logs.txt 2>&1
-                    
-                    echo Pipeline: PR %%CHANGE_ID%% > artifacts\\smoke-report.txt
-                    echo Status: SUCCESS >> artifacts\\smoke-report.txt
-                    echo Timestamp: %DATE% %TIME% >> artifacts\\smoke-report.txt
-                    
+                    if not exist artifacts mkdir artifacts
+                    docker logs %CONTAINER_NAME% > artifacts\\logs.txt 2>&1
+                    echo Build %BUILD_NUMBER% - SUCCESS > artifacts\\report.txt
                     dir artifacts
                 '''
                 archiveArtifacts artifacts: 'artifacts/**/*', fingerprint: true
@@ -111,12 +87,9 @@ pipeline {
         
         stage('Cleanup') {
             steps {
+                echo '=== Stage 7: Cleanup ==='
                 bat '''
-                    docker stop %CONTAINER_NAME% || exit /b 0
-                    docker rm %CONTAINER_NAME% || exit /b 0
-                    echo Nettoyage terminé
+                    docker stop %CONTAINER_NAME% || echo OK
+                    docker rm %CONTAINER_NAME% || echo OK
                 '''
             }
-        }
-    }
-}
