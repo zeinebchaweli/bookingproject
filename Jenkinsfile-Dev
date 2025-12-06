@@ -67,14 +67,19 @@ pipeline {
             }
         }
         
-   stage('Smoke Test') {
+stage('Smoke Test') {
     steps {
-        echo '=== Stage 5: Tests (FORCED FAILURE) ==='
+        echo '=== Stage 5: Tests ==='
         bat '''
             echo [TEST] Checking HTTP endpoint...
-            curl -f http://localhost:8083
-            echo [FAILED] Simulating test failure for demonstration
-            exit /b 1
+            curl -f http://localhost:8083 || exit /b 1
+            echo [PASSED] HTTP test
+            
+            echo [TEST] Checking container health...
+            docker inspect %CONTAINER_NAME% --format="{{.State.Status}}" | findstr running || exit /b 1
+            echo [PASSED] Container health
+            
+            echo ✅ ALL TESTS PASSED
         '''
     }
         }
