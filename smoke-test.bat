@@ -73,6 +73,6 @@ IF %FAILED% GTR 0 (
     exit /b 1
 ) ELSE (
     echo [SUCCESS] All tests passed
-    exit /b 1
+    exit /b 0
 )
- "test: force failure"
+
