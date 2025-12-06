@@ -1,17 +1,15 @@
 @echo off
 REM ================================================
-REM Script de Smoke Test pour Windows
+REM Script de Smoke Test pour Windows - FORCED FAILURE
 REM Usage: smoke-test.bat <container_name> <port>
 REM ================================================
-
 SET CONTAINER_NAME=%1
 SET PORT=%2
-
 IF "%CONTAINER_NAME%"=="" SET CONTAINER_NAME=booking-app
 IF "%PORT%"=="" SET PORT=8082
 
 echo =========================================
-echo SMOKE TEST SUITE
+echo SMOKE TEST SUITE - FORCED FAILURE MODE
 echo =========================================
 echo Container: %CONTAINER_NAME%
 echo Port: %PORT%
@@ -56,23 +54,5 @@ IF %ERRORLEVEL% EQU 0 (
 ) ELSE (
     echo [FAILED] Container is not healthy
     SET /A FAILED+=1
-)
-
-REM Results
-echo.
-echo =========================================
-echo TEST SUMMARY
-echo =========================================
-echo Total Tests: %TOTAL%
-echo Passed: %PASSED%
-echo Failed: %FAILED%
-echo =========================================
-
-IF %FAILED% GTR 0 (
-    echo [FAILED] Some tests failed
-    exit /b 1
-) ELSE (
-    echo [SUCCESS] All tests passed
-    exit /b 0
 )
 
