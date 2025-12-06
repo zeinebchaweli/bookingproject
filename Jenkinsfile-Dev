@@ -68,20 +68,16 @@ pipeline {
         }
         
 stage('Smoke Test') {
-    steps {
-        echo '=== Stage 5: Tests ==='
-        bat '''
-            echo [TEST] Checking HTTP endpoint...
-            curl -f http://localhost:8083 || exit /b 1
-            echo [PASSED] HTTP test
-            
-            echo [TEST] Checking container health...
-            docker inspect %CONTAINER_NAME% --format="{{.State.Status}}" | findstr running || exit /b 1
-            echo [PASSED] Container health
-            
-            echo ✅ ALL TESTS PASSED
-        '''
-    }
+            steps {
+                echo '=== Stage 5: Tests ==='
+                bat '''
+                    curl -f http://localhost:8083 || exit /b 1
+                    echo [PASSED] HTTP test
+                    docker inspect %CONTAINER_NAME% --format="{{.State.Status}}" | findstr running || exit /b 1
+                    echo [PASSED] Container health
+                    echo ALL TESTS PASSED
+                '''
+            } 
         }
         
         stage('Archive Artifacts') {
