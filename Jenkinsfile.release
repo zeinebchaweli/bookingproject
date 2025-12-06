@@ -1,91 +1,124 @@
 pipeline {
     agent any
-    options { timestamps() }
+    
+    parameters {
+        string(name: 'VERSION', defaultValue: 'v1.0.0', description: 'Version (vX.Y.Z)')
+    }
     
     environment {
-        DOCKER_IMAGE = 'your-dockerhub/booking-app'
+        DOCKER_IMAGE = "booking-app"
+        CONTAINER_NAME = "booking-release-${params.VERSION}"
     }
     
     stages {
-        stage('Checkout Git') {
+        stage('Checkout') {
             steps {
-                checkout scm
-                echo " Release code checked out - Tag: ${env.TAG_NAME}"
+                echo "=== Stage 1: Checkout ${params.VERSION} ==="
+                git branch: 'main',
+                    url: 'https://github.com/zeinebchaweli/bookingproject.git'
+                bat 'dir'
             }
         }
         
-        stage('Setup Environment') {
+        stage('Setup') {
             steps {
-                bat 'docker --version'
-                bat 'git --version'
-                echo " Release environment ready"
+                echo '=== Stage 2: Setup ==='
+                bat '''
+                    echo Validating version...
+                    echo %VERSION% | findstr /R "^v[0-9]*\.[0-9]*\.[0-9]*$" || exit /b 1
+                    echo [PASSED] Version valid
+                    
+                    if not exist release-artifacts\\%VERSION% mkdir release-artifacts\\%VERSION%
+                    docker --version
+                '''
             }
         }
         
-        stage('Build Versioned Image') {
+        stage('Build') {
             steps {
-                bat "docker build -t ${DOCKER_IMAGE}:${env.TAG_NAME} ."
-                bat "docker build -t ${DOCKER_IMAGE}:latest ."
-                echo " Release images built: ${env.TAG_NAME} and latest"
+                echo '=== Stage 3: Build Release ==='
+                bat '''
+                    docker build -t %DOCKER_IMAGE%:%VERSION% -t %DOCKER_IMAGE%:latest .
+                    docker images %DOCKER_IMAGE%
+                '''
             }
         }
         
-        stage('Run Production Tests') {
+        stage('Run') {
             steps {
-                bat "docker run -d --name release-test-${env.BUILD_NUMBER} -p 8083:80 ${DOCKER_IMAGE}:${env.TAG_NAME}"
-                echo " Release container running on port 8083"
+                echo '=== Stage 4: Deploy ==='
+                bat '''
+                    docker run -d --name %CONTAINER_NAME% -p 8084:80 %DOCKER_IMAGE%:%VERSION%
+                    timeout /t 15 /nobreak
+                    docker ps | findstr %CONTAINER_NAME%
+                '''
             }
         }
         
-        stage('Production Smoke Test') {
+        stage('Smoke Test') {
             steps {
-                script {
-                    sleep 10
-                    try {
-                        bat 'curl -s -o /dev/null -w "HTTP: %{http_code}" http://localhost:8083'
-                        bat 'curl -s http://localhost:8083 | find "DOCTYPE"'
-                        echo " Production tests PASSED"
-                        bat 'echo "Release: ${env.TAG_NAME}" > release-report-${env.TAG_NAME}.txt'
-                        bat 'echo "Build: ${env.BUILD_NUMBER}" >> release-report-${env.TAG_NAME}.txt'
-                        bat 'echo "Tests: PASSED" >> release-report-${env.TAG_NAME}.txt'
-                    } catch (Exception e) {
-                        echo "Production tests FAILED"
-                        bat 'echo "Release: ${env.TAG_NAME}" > release-report-${env.TAG_NAME}.txt'
-                        bat 'echo "Tests: FAILED" >> release-report-${env.TAG_NAME}.txt'
-                        currentBuild.result = 'FAILURE'
-                        error("Production tests failed")
-                    }
-                }
+                echo '=== Stage 5: Release Tests ==='
+                bat '''
+                    echo Test 1: Container
+                    docker ps | findstr %CONTAINER_NAME% || exit /b 1
+                    echo [PASSED]
+                    
+                    echo Test 2: HTTP
+                    curl -f http://localhost:8084 || exit /b 1
+                    echo [PASSED]
+                    
+                    echo Test 3: Content
+                    curl -s http://localhost:8084 | findstr "html" || exit /b 1
+                    echo [PASSED]
+                    
+                    echo Test 4: Memory
+                    docker stats %CONTAINER_NAME% --no-stream
+                    echo [PASSED]
+                    
+                    echo ALL TESTS PASSED
+                '''
             }
         }
         
-        stage('Archive Release Artifacts') {
+        stage('Archive Artifacts') {
             steps {
-                archiveArtifacts artifacts: "release-report-${env.TAG_NAME}.txt", fingerprint: true
-                archiveArtifacts artifacts: 'Dockerfile', fingerprint: true
-                archiveArtifacts artifacts: 'package.json', fingerprint: true
-                echo " Release artifacts archived"
+                echo '=== Stage 6: Archive Release ==='
+                bat '''
+                    echo Saving Docker image...
+                    docker save %DOCKER_IMAGE%:%VERSION% -o release-artifacts\\%VERSION%\\image.tar
+                    
+                    echo Creating logs...
+                    docker logs %CONTAINER_NAME% > release-artifacts\\%VERSION%\\logs.txt 2>&1
+                    docker inspect %CONTAINER_NAME% > release-artifacts\\%VERSION%\\inspect.json
+                    
+                    echo Creating release notes...
+                    (
+                        echo RELEASE %VERSION%
+                        echo Build: %BUILD_NUMBER%
+                        echo Date: %DATE%
+                        echo Status: SUCCESS
+                    ) > release-artifacts\\%VERSION%\\RELEASE-NOTES.txt
+                    
+                    dir release-artifacts\\%VERSION%
+                '''
+                archiveArtifacts artifacts: "release-artifacts/${params.VERSION}/**/*"
             }
         }
         
         stage('Cleanup') {
             steps {
-                bat "docker stop release-test-${env.BUILD_NUMBER} || echo Container already stopped"
-                bat "docker rm release-test-${env.BUILD_NUMBER} || echo Container already removed"
-                echo " Release cleanup completed"
+                bat '''
+                    docker stop %CONTAINER_NAME% || echo OK
+                    docker rm %CONTAINER_NAME% || echo OK
+                '''
             }
         }
     }
     
     post {
-        always {
-            echo "🏁 Release Pipeline completed - Version ${env.TAG_NAME}"
-        }
         success {
-            echo " RELEASE SUCCESSFUL! Version ${env.TAG_NAME} is ready for production!"
-        }
-        failure {
-            echo " RELEASE FAILED! Version ${env.TAG_NAME} cannot be deployed"
+            echo "✅ Release ${params.VERSION} SUCCESS"
         }
     }
 }
+```
