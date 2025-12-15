@@ -10,52 +10,48 @@ pipeline {
     }
 
     stages {
+        // STAGE 1: Checkout
         stage('Checkout Release') {
             steps {
-                echo "=== Checkout RELEASE ${env.TAG_NAME} ==="
+                echo "=== Checkout RELEASE ==="
                 checkout scm
-                bat 'echo Building version: %CLEAN_VERSION% && dir'
-            }
-        }
-        
-        stage('Validate Tag') {
-            when {
-                tag 'v*'
-            }
-            steps {
-                script {
-                    echo "✅ Validating tag format: ${env.TAG_NAME}"
-                }
+                bat '''
+                    echo Building version: %CLEAN_VERSION%
+                    echo Tag: %VERSION%
+                    dir
+                '''
             }
         }
 
+        // STAGE 2: Setup
         stage('Setup') {
             steps {
                 bat '''
                     echo === RELEASE SETUP ===
                     docker --version
-                    echo Version: %CLEAN_VERSION%
-                    echo Tag: %VERSION%
                     
-                    rem Cleanup old release containers
+                    echo Cleaning old release containers...
                     docker stop %CONTAINER_NAME% 2>nul || echo OK
                     docker rm %CONTAINER_NAME% 2>nul || echo OK
                     
+                    echo Creating artifacts directory...
                     mkdir release-artifacts 2>nul
                 '''
             }
         }
 
+        // STAGE 3: Build Docker
         stage('Build Release Image') {
             steps {
                 bat '''
-                    echo === BUILDING RELEASE DOCKER IMAGE ===
+                    echo === BUILDING RELEASE IMAGE ===
                     docker build -t %DOCKER_IMAGE%:%CLEAN_VERSION% .
                     echo ✅ Release image: %DOCKER_IMAGE%:%CLEAN_VERSION%
                 '''
             }
         }
-        
+
+        // STAGE 4: Tag as Latest (only for version tags)
         stage('Tag as Latest') {
             when {
                 tag 'v*'
@@ -69,6 +65,7 @@ pipeline {
             }
         }
 
+        // STAGE 5: Test
         stage('Test Release') {
             steps {
                 bat '''
@@ -89,11 +86,13 @@ pipeline {
             }
         }
 
+        // STAGE 6: Archive (CORRECTED VERSION)
         stage('Archive Release Artefacts') {
             steps {
                 bat '''
                     echo === CREATING RELEASE ARTEFACTS ===
                     
+                    rem 1. Build report
                     echo RELEASE BUILD REPORT > release-artifacts\\release-report.txt
                     echo ========================== >> release-artifacts\\release-report.txt
                     echo Version: %CLEAN_VERSION% >> release-artifacts\\release-report.txt
@@ -102,11 +101,16 @@ pipeline {
                     echo Status: PASSED >> release-artifacts\\release-report.txt
                     echo. >> release-artifacts\\release-report.txt
                     
+                    rem 2. Docker images list
                     echo DOCKER IMAGES: >> release-artifacts\\release-report.txt
-                    docker images %DOCKER_IMAGE% --format "- {{.Tag}} ({{.Size}})" >> release-artifacts\\release-report.txt
+                    docker images %DOCKER_IMAGE% >> release-artifacts\\release-report.txt
                     
-                    echo CONTAINER INFO: > release-artifacts\\container-info.txt
-                    docker inspect %CONTAINER_NAME% --format "Name: {{.Name}}\nStatus: {{.State.Status}}" >> release-artifacts\\container-info.txt 2>nul || echo "No container info" >> release-artifacts\\container-info.txt
+                    rem 3. Container info (SIMPLE VERSION - NO FORMAT ISSUES)
+                    echo CONTAINER INFO > release-artifacts\\container-info.txt
+                    docker ps --filter "name=%CONTAINER_NAME%" >> release-artifacts\\container-info.txt
+                    
+                    rem 4. Simple test result
+                    echo "TEST: PASSED" > release-artifacts\\test-result.txt
                     
                     echo ✅ Release artefacts created
                 '''
@@ -114,6 +118,7 @@ pipeline {
             }
         }
 
+        // STAGE 7: Cleanup
         stage('Cleanup') {
             steps {
                 bat '''
@@ -132,10 +137,9 @@ pipeline {
         }
         success {
             echo '✅ RELEASE PIPELINE SUCCESS'
-            echo '✓ Docker image versionné construit'
-            echo '✓ Tag "latest" appliqué'
-            echo '✓ Tests de release passés'
-            echo '✓ Artefacts de release archivés'
+            echo '✓ Release image built: booking-app:${env.TAG_NAME ?: "latest"}'
+            echo '✓ Tests passed'
+            echo '✓ Artefacts archived'
         }
         failure {
             echo '❌ RELEASE PIPELINE FAILED'
