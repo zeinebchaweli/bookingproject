@@ -1,13 +1,16 @@
 # bookingproject/Dockerfile
-ARG NODE_VERSION=18
+ARG NODE_VERSION=20
 FROM node:${NODE_VERSION}
 
 WORKDIR /app
+
 COPY package*.json ./
 RUN npm install
+
 COPY . .
 RUN npm run build
 
 EXPOSE 80
 CMD ["npm", "start"]
+
 
