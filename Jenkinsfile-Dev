@@ -79,33 +79,37 @@ pipeline {
             }
         }
         
-        // STAGE 4: Run Container
-        stage('Run Container') {
-            steps {
-                bat '''
-                    echo === RUNNING CONTAINER ===
-                    docker run -d --name booking-dev-%BUILD_NUMBER% -p 8080:80 booking-app:%BUILD_TAG%-1
-                    timeout /t 10 /nobreak >nul
-                    echo Container started on port 8080
-                '''
-            }
-        }
-        
-        // STAGE 5: Smoke Test
-        stage('Smoke Test') {
-            steps {
-                bat '''
-                    echo === SMOKE TEST ===
-                    echo Testing HTTP endpoint...
-                    curl -f http://localhost:8080
-                    if errorlevel 1 (
-                        echo ❌ SMOKE TEST FAILED
-                        exit /b 1
-                    )
-                    echo ✅ SMOKE TEST PASSED
-                '''
-            }
-        }
+ stage('Run Container') {
+    steps {
+        bat '''
+            echo === RUNNING CONTAINER ===
+            rem Libérer le port 8080 si utilisé
+            for /f "tokens=*" %%i in ('docker ps -aq --filter "publish=8080"') do (
+                docker stop %%i 2>nul || echo OK
+                docker rm %%i 2>nul || echo OK
+            )
+            
+            docker run -d --name booking-dev-%BUILD_NUMBER% -p 8080:80 booking-app:%BUILD_TAG%-1
+            timeout /t 10 /nobreak >nul
+            echo Container started on port 8080
+        '''
+    }
+}
+
+stage('Smoke Test') {
+    steps {
+        bat '''
+            echo === SMOKE TEST ===
+            echo Testing HTTP endpoint...
+            curl -f http://localhost:8082
+            if errorlevel 1 (
+                echo ❌ SMOKE TEST FAILED
+                exit /b 1
+            )
+            echo ✅ SMOKE TEST PASSED
+        '''
+    }
+}
         
         // STAGE 6: Archive Artifacts
         stage('Archive Artifacts') {
