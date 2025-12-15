@@ -1,18 +1,19 @@
-
 pipeline {
     agent any
     
     environment {
         BUILD_TAG = "dev-${BUILD_NUMBER}"
-        CONTAINER_PREFIX = "booking-${BUILD_NUMBER}"
-        IMAGE_NAME = "booking-app"
     }
     
     stages {
         // STAGE 1: Checkout
         stage('Checkout SCM') {
             steps {
-                checkout scm
+                checkout([$class: 'GitSCM',
+                    branches: [[name: 'dev']],
+                    userRemoteConfigs: [[url: 'https://github.com/zeinebchaweli/bookingproject.git']]
+                ])
+                bat 'echo Checkout complete && dir'
             }
         }
         
@@ -20,43 +21,41 @@ pipeline {
         stage('Setup') {
             steps {
                 bat '''
-                    echo === ENVIRONMENT ===
+                    echo === SETUP ENVIRONMENT ===
                     docker --version
-                    node --version 2>nul || echo "Node not in PATH"
-                    echo.
-                    echo === WORKSPACE ===
+                    echo Workspace: %CD%
                     dir
                 '''
             }
         }
         
-        // STAGE 3: Build Docker (PARALLEL - Exigence du projet)
+        // STAGE 3: Build Docker (PARALLEL - 3 builds)
         stage('Build Docker Images') {
             parallel {
                 stage('Build Standard') {
                     steps {
                         bat '''
-                            echo Building standard image (default target)...
-                            docker build -t %IMAGE_NAME%:%BUILD_TAG%-standard .
-                            echo ✅ Standard image built
+                            echo Building STANDARD image (default)...
+                            docker build -t booking-app:%BUILD_TAG%-standard .
+                            echo ✅ Standard image: booking-app:%BUILD_TAG%-standard
                         '''
                     }
                 }
                 stage('Build Optimized') {
                     steps {
                         bat '''
-                            echo Building optimized production image...
-                            docker build --target production -t %IMAGE_NAME%:%BUILD_TAG%-optimized .
-                            echo ✅ Optimized image built
+                            echo Building OPTIMIZED image (production target)...
+                            docker build --target production -t booking-app:%BUILD_TAG%-optimized .
+                            echo ✅ Optimized image: booking-app:%BUILD_TAG%-optimized
                         '''
                     }
                 }
                 stage('Build Debug') {
                     steps {
                         bat '''
-                            echo Building debug image...
-                            docker build --target debug -t %IMAGE_NAME%:%BUILD_TAG%-debug .
-                            echo ✅ Debug image built
+                            echo Building DEBUG image (debug target)...
+                            docker build --target debug -t booking-app:%BUILD_TAG%-debug .
+                            echo ✅ Debug image: booking-app:%BUILD_TAG%-debug
                         '''
                     }
                 }
@@ -65,11 +64,11 @@ pipeline {
             post {
                 success {
                     bat '''
-                        echo ================================
-                        echo IMAGE SIZE REPORT (Pour votre rapport)
-                        echo ================================
-                        docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | findstr booking-app
-                        echo ================================
+                        echo ====================================
+                        echo IMAGE SIZE COMPARISON
+                        echo ====================================
+                        docker images --format "{{.Tag}} {{.Size}}" | findstr booking-app
+                        echo ====================================
                     '''
                 }
             }
@@ -77,133 +76,108 @@ pipeline {
         
         // STAGE 4: Run Containers
         stage('Run Containers') {
-            parallel {
-                stage('Run Standard') {
-                    steps {
-                        bat '''
-                            echo Starting standard container...
-                            docker run -d --name %CONTAINER_PREFIX%-std -p 8080:80 %IMAGE_NAME%:%BUILD_TAG%-standard
-                            timeout /t 5 /nobreak >nul
-                            echo Container started on port 8080
-                        '''
-                    }
-                }
-                stage('Run Optimized') {
-                    steps {
-                        bat '''
-                            echo Starting optimized container...
-                            docker run -d --name %CONTAINER_PREFIX%-opt -p 8081:80 %IMAGE_NAME%:%BUILD_TAG%-optimized
-                            timeout /t 5 /nobreak >nul
-                            echo Container started on port 8081
-                        '''
-                    }
-                }
-            }
-        }
-        
-        // STAGE 5: Smoke Tests (Exigence: Passed/Failed)
-        stage('Smoke Tests') {
             steps {
                 bat '''
-                    echo ================================
-                    echo SMOKE TEST SUITE
-                    echo ================================
+                    echo Starting containers for testing...
                     
-                    echo [TEST 1] Checking standard container...
-                    curl -f http://localhost:8080 && (
-                        echo ✅ Standard: HTTP 200 OK
-                        echo "STANDARD: PASSED" > test-results.txt
-                    ) || (
-                        echo ❌ Standard: HTTP FAILED
-                        echo "STANDARD: FAILED" > test-results.txt
-                        exit /b 1
-                    )
+                    echo 1. Starting STANDARD container...
+                    docker run -d --name booking-std-%BUILD_NUMBER% -p 8080:80 booking-app:%BUILD_TAG%-standard
                     
-                    echo.
-                    echo [TEST 2] Checking optimized container...
-                    curl -f http://localhost:8081 && (
-                        echo ✅ Optimized: HTTP 200 OK
-                        echo "OPTIMIZED: PASSED" >> test-results.txt
-                    ) || (
-                        echo ❌ Optimized: HTTP FAILED
-                        echo "OPTIMIZED: FAILED" >> test-results.txt
-                        exit /b 1
-                    )
+                    echo 2. Starting OPTIMIZED container...
+                    docker run -d --name booking-opt-%BUILD_NUMBER% -p 8081:80 booking-app:%BUILD_TAG%-optimized
                     
-                    echo.
-                    echo [TEST 3] Container status verification...
-                    docker ps --format "table {{.Names}}\t{{.Status}}" | findstr %CONTAINER_PREFIX%
-                    
-                    echo.
-                    echo ================================
-                    echo ✅ ALL SMOKE TESTS PASSED
-                    echo ================================
+                    timeout /t 10 /nobreak >nul
+                    echo Containers started
                 '''
             }
         }
         
-        // STAGE 6: Archive Artifacts (Exigence)
+        // STAGE 5: Smoke Tests
+        stage('Smoke Test') {
+            steps {
+                bat '''
+                    echo ====================================
+                    echo SMOKE TESTS
+                    echo ====================================
+                    
+                    echo [TEST 1] Checking STANDARD container (port 8080)...
+                    curl -f http://localhost:8080
+                    if errorlevel 1 (
+                        echo ❌ STANDARD CONTAINER FAILED
+                        exit /b 1
+                    )
+                    echo ✅ Standard: PASSED
+                    
+                    echo.
+                    echo [TEST 2] Checking OPTIMIZED container (port 8081)...
+                    curl -f http://localhost:8081
+                    if errorlevel 1 (
+                        echo ❌ OPTIMIZED CONTAINER FAILED
+                        exit /b 1
+                    )
+                    echo ✅ Optimized: PASSED
+                    
+                    echo.
+                    echo [TEST 3] Container status...
+                    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | findstr booking-
+                    
+                    echo ====================================
+                    echo ✅ ALL SMOKE TESTS PASSED
+                    echo ====================================
+                '''
+            }
+        }
+        
+        // STAGE 6: Archive Artifacts
         stage('Archive Artifacts') {
             steps {
                 bat '''
                     mkdir artifacts 2>nul
                     
-                    echo === CREATING ARTIFACTS ===
+                    echo Creating artifacts...
                     
-                    # 1. Build info
-                    echo "JENKINS BUILD ARTIFACTS" > artifacts\\build-report.md
-                    echo "=======================" >> artifacts\\build-report.md
-                    echo "" >> artifacts\\build-report.md
-                    echo "**Pipeline:** Dev" >> artifacts\\build-report.md
-                    echo "**Build:** %BUILD_NUMBER%" >> artifacts\\build-report.md
-                    echo "**Date:** %DATE% %TIME%" >> artifacts\\build-report.md
-                    echo "" >> artifacts\\build-report.md
-                    echo "**Docker Images Created:**" >> artifacts\\build-report.md
-                    docker images --format "- \`{{.Tag}}\` ({{.Size}})" | findstr booking-app >> artifacts\\build-report.md
+                    rem 1. Build info
+                    echo JENKINS BUILD REPORT > artifacts\\build-info.txt
+                    echo =================== >> artifacts\\build-info.txt
+                    echo Build: %BUILD_NUMBER% >> artifacts\\build-info.txt
+                    echo Tag: %BUILD_TAG% >> artifacts\\build-info.txt
+                    echo Date: %DATE% %TIME% >> artifacts\\build-info.txt
+                    echo. >> artifacts\\build-info.txt
                     
-                    # 2. Test results
-                    copy test-results.txt artifacts\\ 2>nul || echo No test results
+                    rem 2. Docker images list (SANS backticks)
+                    echo DOCKER IMAGES CREATED >> artifacts\\build-info.txt
+                    docker images --format "- {{.Tag}} ({{.Size}})" | findstr booking-app >> artifacts\\build-info.txt
                     
-                    # 3. Docker info
-                    docker info > artifacts\\docker-info.txt
+                    rem 3. Test results
+                    echo SMOKE TEST RESULTS: PASSED > artifacts\\test-results.txt
+                    echo Timestamp: %TIME% >> artifacts\\test-results.txt
                     
-                    # 4. Image inspection
-                    docker inspect %IMAGE_NAME%:%BUILD_TAG%-optimized > artifacts\\image-details.json
+                    rem 4. Docker info
+                    docker info > artifacts\\docker-info.txt 2>&1
                     
-                    # 5. Size comparison table (important pour le rapport)
-                    echo "IMAGE SIZE COMPARISON" > artifacts\\size-comparison.txt
-                    echo "=====================" >> artifacts\\size-comparison.txt
-                    docker images --format "{{.Tag}};{{.Size}}" | findstr booking-app > artifacts\\sizes.csv
+                    rem 5. Simple size comparison
+                    echo IMAGE SIZES > artifacts\\sizes.txt
+                    docker images --format "{{.Tag}}: {{.Size}}" | findstr booking-app >> artifacts\\sizes.txt
                     
-                    echo ✅ Artifacts created
+                    echo ✅ Artifacts created in artifacts\\ folder
                 '''
                 
-                // Archivage Jenkins
                 archiveArtifacts artifacts: 'artifacts/**/*', fingerprint: true
-                
-                // Archive aussi les logs de console
-                archiveArtifacts artifacts: '**/*.log', allowEmptyArchive: true
             }
         }
         
-        // STAGE 7: Cleanup (Recommandé)
+        // STAGE 7: Cleanup
         stage('Cleanup') {
             steps {
                 bat '''
-                    echo === CLEANUP ===
+                    echo Cleaning up containers...
+                    docker stop booking-std-%BUILD_NUMBER% booking-opt-%BUILD_NUMBER% 2>nul || echo Containers already stopped
+                    docker rm booking-std-%BUILD_NUMBER% booking-opt-%BUILD_NUMBER% 2>nul || echo Containers already removed
                     
-                    echo Stopping containers...
-                    docker stop %CONTAINER_PREFIX%-std 2>nul || echo "Container already stopped"
-                    docker stop %CONTAINER_PREFIX%-opt 2>nul || echo "Container already stopped"
-                    
-                    echo Removing containers...
-                    docker rm %CONTAINER_PREFIX%-std 2>nul || echo "Container already removed"
-                    docker rm %CONTAINER_PREFIX%-opt 2>nul || echo "Container already removed"
-                    
-                    echo Removing unused images...
+                    echo Cleaning up unused images...
                     docker image prune -f
                     
-                    echo ✅ Cleanup completed
+                    echo ✅ Cleanup complete
                 '''
             }
         }
@@ -211,31 +185,18 @@ pipeline {
     
     post {
         always {
-            echo "=== PIPELINE COMPLETED ==="
-            echo "Status: ${currentBuild.currentResult}"
-            echo "Duration: ${currentBuild.durationString}"
-            echo "URL: ${env.BUILD_URL}"
-            
-            // Archive le log complet
-            script {
-                def log = currentBuild.rawBuild.getLog(200).join('\n')
-                writeFile file: 'artifacts/full-pipeline-log.txt', text: log
-            }
+            echo "Pipeline completed: ${currentBuild.currentResult}"
         }
         success {
-            echo '✅ PROJECT REQUIREMENTS MET:'
-            echo '   ✓ 3 parallel Docker builds'
-            echo '   ✓ Multi-stage optimization'
-            echo '   ✓ Smoke tests (Passed/Failed)'
-            echo '   ✓ Artefacts archived'
-            echo '   ✓ Proper Git workflow'
+            echo '✅ DEV PIPELINE SUCCESS'
+            echo '✓ 3 parallel Docker builds'
+            echo '✓ Multi-stage optimization'
+            echo '✓ Smoke tests executed'
+            echo '✓ Artifacts archived'
         }
         failure {
-            echo '❌ PIPELINE FAILED'
-            echo 'Check the logs above for details'
-            
-            // Archive même en cas d'échec
-            archiveArtifacts artifacts: '**/*.txt,**/*.log', allowEmptyArchive: true
+            echo '❌ DEV PIPELINE FAILED'
+            archiveArtifacts artifacts: '**/*.log,**/*.txt', allowEmptyArchive: true
         }
     }
 }
