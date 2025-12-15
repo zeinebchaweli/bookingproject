@@ -3,143 +3,67 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = "booking-app"
-        VERSION = "${env.TAG_NAME ?: 'latest'}"
-        CLEAN_VERSION = "${VERSION.replaceFirst('v', '')}"
-        CONTAINER_NAME = "booking-rel-${CLEAN_VERSION}"
+        VERSION = "v1.0.0"
+        CONTAINER_NAME = "booking-rel-v1-0-0"
         TEST_PORT = "8084"
     }
 
     stages {
-        // STAGE 1: Checkout
-        stage('Checkout Release') {
+        stage('Checkout') {
             steps {
-                echo "=== Checkout RELEASE ==="
                 checkout scm
+                bat 'echo Release Pipeline Started && dir'
+            }
+        }
+        
+        stage('Build') {
+            steps {
                 bat '''
-                    echo Building version: %CLEAN_VERSION%
-                    echo Tag: %VERSION%
-                    dir
+                    echo Building Docker image...
+                    docker build -t %DOCKER_IMAGE%:%VERSION% .
+                    echo ✅ Image built: %DOCKER_IMAGE%:%VERSION%
                 '''
             }
         }
-
-        // STAGE 2: Setup
-        stage('Setup') {
+        
+        stage('Test') {
             steps {
                 bat '''
-                    echo === RELEASE SETUP ===
-                    docker --version
-                    
-                    echo Cleaning old release containers...
-                    docker stop %CONTAINER_NAME% 2>nul || echo OK
-                    docker rm %CONTAINER_NAME% 2>nul || echo OK
-                    
-                    echo Creating artifacts directory...
-                    mkdir release-artifacts 2>nul
-                '''
-            }
-        }
-
-        // STAGE 3: Build Docker
-        stage('Build Release Image') {
-            steps {
-                bat '''
-                    echo === BUILDING RELEASE IMAGE ===
-                    docker build -t %DOCKER_IMAGE%:%CLEAN_VERSION% .
-                    echo ✅ Release image: %DOCKER_IMAGE%:%CLEAN_VERSION%
-                '''
-            }
-        }
-
-        // STAGE 4: Tag as Latest (only for version tags)
-        stage('Tag as Latest') {
-            when {
-                tag 'v*'
-            }
-            steps {
-                bat '''
-                    echo === TAGGING AS LATEST ===
-                    docker tag %DOCKER_IMAGE%:%CLEAN_VERSION% %DOCKER_IMAGE%:latest
-                    echo ✅ Tagged: %DOCKER_IMAGE%:latest
-                '''
-            }
-        }
-
-        // STAGE 5: Test
-        stage('Test Release') {
-            steps {
-                bat '''
-                    echo === TESTING RELEASE IMAGE ===
-                    docker run -d --name %CONTAINER_NAME% -p %TEST_PORT%:80 %DOCKER_IMAGE%:%CLEAN_VERSION%
-                    
-                    echo Waiting for container to start...
+                    echo Testing release...
+                    docker run -d --name %CONTAINER_NAME% -p %TEST_PORT%:80 %DOCKER_IMAGE%:%VERSION%
                     ping 127.0.0.1 -n 11 > nul
                     
-                    echo Testing HTTP endpoint...
                     curl -f http://localhost:%TEST_PORT%
                     if errorlevel 1 (
-                        echo ❌ RELEASE TEST FAILED
+                        echo ❌ TEST FAILED
                         exit /b 1
                     )
-                    echo ✅ RELEASE TEST PASSED
+                    echo ✅ TEST PASSED
+                    
+                    docker stop %CONTAINER_NAME%
+                    docker rm %CONTAINER_NAME%
                 '''
             }
         }
-
-        // STAGE 6: Archive (CORRECTED VERSION)
-        stage('Archive Release Artefacts') {
+        
+        stage('Archive') {
             steps {
                 bat '''
-                    echo === CREATING RELEASE ARTEFACTS ===
-                    
-                    rem 1. Build report
-                    echo RELEASE BUILD REPORT > release-artifacts\\release-report.txt
-                    echo ========================== >> release-artifacts\\release-report.txt
-                    echo Version: %CLEAN_VERSION% >> release-artifacts\\release-report.txt
-                    echo Tag: %VERSION% >> release-artifacts\\release-report.txt
-                    echo Date: %DATE% %TIME% >> release-artifacts\\release-report.txt
-                    echo Status: PASSED >> release-artifacts\\release-report.txt
-                    echo. >> release-artifacts\\release-report.txt
-                    
-                    rem 2. Docker images list
-                    echo DOCKER IMAGES: >> release-artifacts\\release-report.txt
-                    docker images %DOCKER_IMAGE% >> release-artifacts\\release-report.txt
-                    
-                    rem 3. Container info (SIMPLE VERSION - NO FORMAT ISSUES)
-                    echo CONTAINER INFO > release-artifacts\\container-info.txt
-                    docker ps --filter "name=%CONTAINER_NAME%" >> release-artifacts\\container-info.txt
-                    
-                    rem 4. Simple test result
-                    echo "TEST: PASSED" > release-artifacts\\test-result.txt
-                    
-                    echo ✅ Release artefacts created
+                    mkdir release-artifacts 2>nul
+                    echo "RELEASE: %VERSION%" > release-artifacts\\release.txt
+                    echo "Date: %DATE% %TIME%" >> release-artifacts\\release.txt
+                    echo "Status: PASSED" >> release-artifacts\\release.txt
+                    docker images %DOCKER_IMAGE% > release-artifacts\\images.txt
+                    echo ✅ Artefacts created
                 '''
-                archiveArtifacts artifacts: 'release-artifacts/**/*', fingerprint: true
-            }
-        }
-
-        // STAGE 7: Cleanup
-        stage('Cleanup') {
-            steps {
-                bat '''
-                    echo === CLEANUP ===
-                    docker stop %CONTAINER_NAME% 2>nul || echo Already stopped
-                    docker rm %CONTAINER_NAME% 2>nul || echo Already removed
-                    echo ✅ Cleanup completed
-                '''
+                archiveArtifacts artifacts: 'release-artifacts/**/*'
             }
         }
     }
     
     post {
-        always {
-            echo "Release Pipeline completed for: ${env.TAG_NAME ?: 'latest'}"
-        }
         success {
             echo '✅ RELEASE PIPELINE SUCCESS'
-            echo '✓ Release image built: booking-app:${env.TAG_NAME ?: "latest"}'
-            echo '✓ Tests passed'
-            echo '✓ Artefacts archived'
         }
         failure {
             echo '❌ RELEASE PIPELINE FAILED'
