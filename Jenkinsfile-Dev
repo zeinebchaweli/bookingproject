@@ -79,7 +79,7 @@ pipeline {
             }
         }
         
- stage('Run Container') {
+stage('Run Container') {
     steps {
         bat '''
             echo === RUNNING CONTAINER ===
@@ -90,7 +90,11 @@ pipeline {
             )
             
             docker run -d --name booking-dev-%BUILD_NUMBER% -p 8080:80 booking-app:%BUILD_TAG%-1
-            timeout /t 10 /nobreak >nul
+            
+            rem Attendre avec ping (plus fiable)
+            echo Waiting for container to start...
+            ping 127.0.0.1 -n 11 > nul
+            
             echo Container started on port 8080
         '''
     }
@@ -101,7 +105,7 @@ stage('Smoke Test') {
         bat '''
             echo === SMOKE TEST ===
             echo Testing HTTP endpoint...
-            curl -f http://localhost:8082
+            curl -f http://localhost:8080
             if errorlevel 1 (
                 echo ❌ SMOKE TEST FAILED
                 exit /b 1
