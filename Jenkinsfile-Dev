@@ -16,17 +16,22 @@ pipeline {
             }
         }
 
-        stage('Setup') {
-            steps {
-                bat '''
-                    docker --version
-                    for /f "tokens=*" %%i in ('docker ps -aq --filter "name=booking-dev"') do (
-                        docker stop %%i 2>nul
-                        docker rm %%i 2>nul
-                    )
-                '''
-            }
-        }
+      stage('Setup') {
+    steps {
+        bat '''
+            echo === SETUP ===
+            docker --version
+
+            echo Cleaning old containers (if any)...
+            for /F "tokens=*" %%i in ('docker ps -aq --filter "name=booking-dev"') do (
+                docker stop %%i 2>nul || echo OK
+                docker rm %%i 2>nul || echo OK
+            )
+
+            exit /b 0
+        '''
+    }
+}
 
         stage('Build Docker Images') {
             parallel {
