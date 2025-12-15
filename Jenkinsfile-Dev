@@ -34,34 +34,21 @@ pipeline {
             }
         }
         
-       // STAGE 3: Build Docker Images (PARALLEL BY RUNTIME)
-stage('Build Docker Images (Parallel Runtime)') {
-    parallel {
+       parallel(
+  "Build Node 20": {
+      bat '''
+      docker build --build-arg NODE_VERSION=20 -t booking-app:node20 .
+      '''
+  },
+  "Build Node 18 (optional)": {
+      catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+          bat '''
+          docker build --build-arg NODE_VERSION=18 -t booking-app:node18 .
+          '''
+      }
+  }
+)
 
-        stage('Build with Node 18') {
-            steps {
-                bat '''
-                    echo === BUILD WITH NODE 18 ===
-                    docker build ^
-                      --build-arg NODE_VERSION=18 ^
-                      -t booking-app:%BUILD_TAG%-node18 .
-                    echo ✅ Image Node 18 built
-                '''
-            }
-        }
-
-        stage('Build with Node 20') {
-            steps {
-                bat '''
-                    echo === BUILD WITH NODE 20 ===
-                    docker build ^
-                      --build-arg NODE_VERSION=20 ^
-                      -t booking-app:%BUILD_TAG%-node20 .
-                    echo ✅ Image Node 20 built
-                '''
-            }
-        }
-    }
 
     post {
         success {
