@@ -34,50 +34,48 @@ pipeline {
             }
         }
         
-        // STAGE 3: Build Docker (PARALLEL)
-        stage('Build Docker Images') {
-            parallel {
-                stage('Build Image 1') {
-                    steps {
-                        bat '''
-                            echo Building Docker image 1...
-                            docker build -t booking-app:%BUILD_TAG%-1 .
-                            echo ✅ Image 1 built
-                        '''
-                    }
-                }
-                stage('Build Image 2') {
-                    steps {
-                        bat '''
-                            echo Building Docker image 2...
-                            docker build -t booking-app:%BUILD_TAG%-2 .
-                            echo ✅ Image 2 built
-                        '''
-                    }
-                }
-                stage('Build Image 3') {
-                    steps {
-                        bat '''
-                            echo Building Docker image 3...
-                            docker build -t booking-app:%BUILD_TAG%-3 .
-                            echo ✅ Image 3 built
-                        '''
-                    }
-                }
-            }
-            
-            post {
-                success {
-                    bat '''
-                        echo ================================
-                        echo DOCKER IMAGES CREATED:
-                        echo ================================
-                        docker images booking-app --format "table {{.Tag}}\t{{.Size}}"
-                        echo ================================
-                    '''
-                }
+       // STAGE 3: Build Docker Images (PARALLEL BY RUNTIME)
+stage('Build Docker Images (Parallel Runtime)') {
+    parallel {
+
+        stage('Build with Node 18') {
+            steps {
+                bat '''
+                    echo === BUILD WITH NODE 18 ===
+                    docker build ^
+                      --build-arg NODE_VERSION=18 ^
+                      -t booking-app:%BUILD_TAG%-node18 .
+                    echo ✅ Image Node 18 built
+                '''
             }
         }
+
+        stage('Build with Node 20') {
+            steps {
+                bat '''
+                    echo === BUILD WITH NODE 20 ===
+                    docker build ^
+                      --build-arg NODE_VERSION=20 ^
+                      -t booking-app:%BUILD_TAG%-node20 .
+                    echo ✅ Image Node 20 built
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            bat '''
+                echo ================================
+                echo DOCKER IMAGES CREATED (PARALLEL):
+                echo ================================
+                docker images booking-app --format "table {{.Tag}}\t{{.Size}}"
+                echo ================================
+            '''
+        }
+    }
+}
+
         
 stage('Run Container') {
     steps {
