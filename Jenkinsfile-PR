@@ -51,6 +51,16 @@ pipeline {
                 archiveArtifacts artifacts: 'artifacts/**/*'
             }
         }
+        
+        stage('Cleanup') {
+            steps {
+                bat '''
+                    echo Cleaning up temporary images...
+                    docker image prune -f
+                    echo ✅ Cleanup done
+                '''
+            }
+        }
     }
     
     post {
@@ -59,6 +69,7 @@ pipeline {
             echo '✓ Docker image built and tested'
             echo '✓ Smoke test passed'
             echo '✓ Artefacts archived'
+            echo '✓ Cleanup performed'
         }
         failure {
             echo '❌ PR PIPELINE FAILED'
