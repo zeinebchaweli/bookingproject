@@ -2,7 +2,6 @@ pipeline {
     agent any
     
     stages {
-        // STAGE 1: Checkout
         stage('Checkout') {
             steps {
                 checkout scm
@@ -10,7 +9,6 @@ pipeline {
             }
         }
         
-        // STAGE 2: Build Docker
         stage('Build Docker') {
             steps {
                 bat '''
@@ -21,7 +19,6 @@ pipeline {
             }
         }
         
-        // STAGE 3: Test
         stage('Test') {
             steps {
                 bat '''
@@ -43,27 +40,15 @@ pipeline {
             }
         }
         
-        // STAGE 4: Archive
         stage('Archive') {
             steps {
                 bat '''
                     mkdir artifacts 2>nul
-                    echo "PR Build %BUILD_NUMBER% - PASSED" > artifacts\result.txt
-                    echo "Date: %DATE% %TIME%" >> artifacts\result.txt
+                    echo "PR Build %BUILD_NUMBER% - PASSED" > artifacts\\result.txt
+                    echo "Date: %DATE% %TIME%" >> artifacts\\result.txt
+                    echo ✅ Artefacts created
                 '''
                 archiveArtifacts artifacts: 'artifacts/**/*'
-            }
-        }
-        
-        // STAGE 5: Cleanup
-        stage('Cleanup') {
-            steps {
-                bat '''
-                    echo Cleaning up...
-                    docker stop pr-test-%BUILD_NUMBER% 2>nul || echo OK
-                    docker rm pr-test-%BUILD_NUMBER% 2>nul || echo OK
-                    echo ✅ Cleanup done
-                '''
             }
         }
     }
@@ -71,6 +56,9 @@ pipeline {
     post {
         success {
             echo '✅ PR PIPELINE SUCCESS - Ready for merge!'
+            echo '✓ Docker image built and tested'
+            echo '✓ Smoke test passed'
+            echo '✓ Artefacts archived'
         }
         failure {
             echo '❌ PR PIPELINE FAILED'
