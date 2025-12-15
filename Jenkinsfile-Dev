@@ -34,20 +34,30 @@ pipeline {
             }
         }
         
-       parallel(
-  "Build Node 20": {
-      bat '''
-      docker build --build-arg NODE_VERSION=20 -t booking-app:node20 .
-      '''
-  },
-  "Build Node 18 (optional)": {
-      catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-          bat '''
-          docker build --build-arg NODE_VERSION=18 -t booking-app:node18 .
-          '''
-      }
-  }
-)
+  stage('Build Docker Images (Parallel)') {
+    parallel {
+
+        stage('Build with Node 20') {
+            steps {
+                bat '''
+                    echo === BUILD WITH NODE 20 ===
+                    docker build -t booking-app:node20-dev-%BUILD_NUMBER% .
+                '''
+            }
+        }
+
+        stage('Build with Node 18 (Test Only)') {
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    bat '''
+                        echo === BUILD WITH NODE 18 ===
+                        docker build -t booking-app:node18-dev-%BUILD_NUMBER% .
+                    '''
+                }
+            }
+        }
+    }
+}
 
 
     post {
