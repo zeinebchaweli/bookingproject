@@ -1,4 +1,3 @@
-// Version finale SANS Cleanup stage séparé
 pipeline {
     agent any
     
@@ -57,9 +56,10 @@ pipeline {
         }
     }
     
-post {
-    always {
-        echo "PR Pipeline execution completed"
+    post {
+        always {
+            echo "PR Pipeline execution completed"
+        }
     }
 }
            
